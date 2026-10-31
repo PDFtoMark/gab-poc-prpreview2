@@ -1,0 +1,18 @@
+name: repo-gate-signal
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  gated:
+    if: github.repository == 'opensearch-project/OpenSearch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: gated privileged step
+        run: echo "REACHED GATED STEP"
+  show:
+    runs-on: ubuntu-latest
+    steps:
+      - name: show repository identity
+        run: |
+          echo "github.repository=$GITHUB_REPOSITORY"
+          if [ "$GITHUB_REPOSITORY" = "opensearch-project/OpenSearch" ]; then echo GATE_MATCH; else echo GATE_NOMATCH; fi
