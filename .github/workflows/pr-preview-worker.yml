@@ -14,7 +14,91 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: PR preview (worker)
-        uses: open-resource-discovery/pr-preview-action@main
+      # --- verbatim copy of open-resource-discovery/pr-preview-action@main (worker path) ---
+      - name: Download artifact (worker)
+        if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: pr-preview
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "token input is required for fork deploy."
+            exit 1
+          fi
+
+          API_URL="${GITHUB_API_URL:-https://api.github.com}"
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          SOURCE_REPO="${{ github.event.workflow_run.repository.full_name }}"
+
+          echo "Fetching artifacts for run $RUN_ID from $SOURCE_REPO via $API_URL"
+
+          resp="$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$API_URL/repos/$SOURCE_REPO/actions/runs/$RUN_ID/artifacts")"
+
+          archive_url="$(python -c 'import sys, json, os
+          d=json.load(sys.stdin)
+          name=os.environ["ARTIFACT_NAME"]
+          for a in d.get("artifacts", []):
+            if a.get("name")==name:
+              print(a.get("archive_download_url",""))
+              break
+          ' <<< "$resp")"
+
+          if [ -z "$archive_url" ]; then
+            echo "Artifact '$ARTIFACT_NAME' not found in workflow run $RUN_ID"
+            exit 1
+          fi
+
+          rm -rf preview artifact.zip
+          mkdir -p preview
+
+          curl -fsSL -L \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -o artifact.zip \
+            "$archive_url"
+
+          unzip -q artifact.zip -d preview
+
+      - name: Read worker instructions (worker)
+        id: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          META="preview/pr-preview-meta.env"
+          if [ ! -f "$META" ]; then
+            echo "Missing meta file: $META"
+            exit 1
+          fi
+
+          set -a
+          . "$META"
+          set +a
+
+          UMBRELLA_DIR="${UMBRELLA_DIR:-}"
+          PREVIEW_TARGET_FOLDER="$UMBRELLA_DIR/pr-$PR_NUMBER"
+          {
+            echo "deployment_action=$WORKER_ACTION"
+            echo "pr_number=$PR_NUMBER"
+            echo "target_repo=$TARGET_REPO"
+            echo "target_branch=$TARGET_BRANCH"
+            echo "preview_target_folder=$PREVIEW_TARGET_FOLDER"
+          } >> "$GITHUB_OUTPUT"
+
+      # --- mirrors the action's "Deploy preview" step, which receives the PAT secret ---
+      - name: Deploy preview (mirrors action step)
+        if: steps.worker.outputs.deployment_action == 'deploy'
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
           token: ${{ secrets.PR_PREVIEW_TOKEN }}
+          repository-name: ${{ steps.worker.outputs.target_repo }}
+          branch: ${{ steps.worker.outputs.target_branch }}
+          folder: preview
+          target-folder: ${{ steps.worker.outputs.preview_target_folder }}
+          clean: false
